@@ -1,7 +1,7 @@
 /*
  * UNG's Not GNU
  *
- * Copyright (c) 2019, Jakob Kaivo <jkk@ung.org>
+ * Copyright (c) 2020, Jakob Kaivo <jkk@ung.org>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,9 @@
  * SOFTWARE.
  */
 
-#define _XOPEN_SOURECE 700
+#define _XOPEN_SOURCE 700
 #include <errno.h>
+#include <limits.h>
 #include <locale.h>
 #include <search.h>
 #include <stdio.h>
@@ -41,19 +42,40 @@ struct ipcrm {
 	struct ipcrm *next;
 	struct ipcrm *prev;
 	ipc_type type;
-	const char *id;
+	const char *s;
+	int id;
 };
 
-static struct ipcrm *ipcrm_q(ipc_type t, const char *id, struct ipcrm *head)
+static struct ipcrm *ipcrm_q(ipc_type type, const char *id, struct ipcrm *head)
 {
 	struct ipcrm *add = calloc(1, sizeof(*add));
 	if (add == NULL) {
 		perror("ipcrm");
 		return NULL;
 	}
-	add->type = t;
-	add->id = id;
-	/* TODO: do ID translation and error checking at this point */
+	add->type = type;
+	add->s = id;
+
+	errno = 0;
+	char *end = NULL;
+	add->id = strtol(id, &end, 0);
+	if ((end && *end) || (add->id == LONG_MAX && errno) || (add->id < 0)) {
+		fprintf(stderr, "ipcrm: %s: %s\n", id, strerror(EINVAL));
+		return NULL;
+	}
+
+	if (type == MSGKEY) {
+		add->id = msgget(add->id, 0);
+	} else if (type == SEMKEY) {
+		add->id = semget(add->id, 0, 0);
+	} else if (type == SHMKEY) {
+		add->id = shmget(add->id, 0, 0);
+	}
+
+	if (add->id == -1) {
+		fprintf(stderr, "ipcrm: %s: %s\n", id, strerror(EINVAL));
+		return NULL;
+	}
 
 	if (head == NULL) {
 		return add;
@@ -70,37 +92,27 @@ static struct ipcrm *ipcrm_q(ipc_type t, const char *id, struct ipcrm *head)
 
 static int ipcrm(struct ipcrm *ipc)
 {
-	int id = atoi(ipc->id);
 	int ret = 0;
 
 	switch (ipc->type) {
 	case MSGID:
-		ret = msgctl(id, IPC_RMID, NULL);
-		break;
-
 	case MSGKEY:
-		/* TODO */
+		ret = msgctl(ipc->id, IPC_RMID, NULL);
 		break;
 
 	case SEMID:
-		ret = semctl(id, 0, IPC_RMID);
-		break;
-
 	case SEMKEY:
-		/* TODO */
+		ret = semctl(ipc->id, 0, IPC_RMID);
 		break;
 
 	case SHMID:
-		ret = shmctl(id, IPC_RMID, NULL);
-		break;
-
 	case SHMKEY:
-		/* TODO */
+		ret = shmctl(ipc->id, IPC_RMID, NULL);
 		break;
 	}
 
 	if (ret == -1) {
-		fprintf(stderr, "ipcrm: %s: %s\n", ipc->id, strerror(errno));
+		fprintf(stderr, "ipcrm: %s: %s\n", ipc->s, strerror(errno));
 		return 1;
 	}
 
@@ -151,7 +163,6 @@ int main(int argc, char *argv[])
 	}
 
 	while (list) {
-		printf("remove '%s' (%d)\n", list->id, list->type);
 		ret |= ipcrm(list);
 		list = list->next;
 	}
