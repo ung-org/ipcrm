@@ -58,11 +58,12 @@ static struct ipcrm *ipcrm_q(ipc_type type, const char *id, struct ipcrm *head)
 
 	errno = 0;
 	char *end = NULL;
-	add->id = strtol(id, &end, 0);
-	if ((end && *end) || (add->id == LONG_MAX && errno) || (add->id < 0)) {
+	long l = strtol(id, &end, 0);
+	if ((end && *end) || (l > INT_MAX) || (l < 0)) {
 		fprintf(stderr, "ipcrm: %s: %s\n", id, strerror(EINVAL));
 		return NULL;
 	}
+	add->id = l;
 
 	if (type == MSGKEY) {
 		add->id = msgget(add->id, 0);
